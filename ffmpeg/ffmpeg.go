@@ -1,7 +1,5 @@
 package ffmpeg
 
-// #cgo CFLAGS: -I/home/max/Downloads/ffmpeg-6.0
-// #cgo LDFLAGS: -L/home/max/Downloads/ffmpeg-6.0 -lavcodec -lavformat -lavutil -lswscale
 // #cgo pkg-config: libavformat libavcodec libavutil libswscale
 // #include <libavformat/avformat.h>
 // #include <libavcodec/avcodec.h>
