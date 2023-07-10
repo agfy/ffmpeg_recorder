@@ -2,11 +2,13 @@ module github.com/agfy/doom_recorder
 
 go 1.19
 
-require github.com/agfy/doom_environment v0.0.0-20230328204133-8f832a9e56a1
+require (
+	github.com/agfy/doom_environment v0.0.0-20230328204133-8f832a9e56a1
+	github.com/go-vgo/robotgo v1.0.0-beta5.3
+)
 
 require (
 	github.com/go-ole/go-ole v1.2.6 // indirect
-	github.com/go-vgo/robotgo v1.0.0-beta5.3 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
 	github.com/lxn/win v0.0.0-20210218163916-a377121e959e // indirect
 	github.com/otiai10/gosseract v2.2.1+incompatible // indirect

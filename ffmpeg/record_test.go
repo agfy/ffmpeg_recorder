@@ -12,19 +12,25 @@ func TestEncoder(t *testing.T) {
 		log.Panicf("Unable to start encoder: %q", err)
 	}
 
-	pixels, err := robotgo.OpenImg("test_img.png")
+	img, err := robotgo.Read("test.png")
 	if err != nil {
 		t.Error(err)
 	}
 
-	println(pixels[0])
+	bmp := robotgo.ImgToBitmap(img)
 
-	for i := 0; i < 25; i++ {
-		e.CreateFrame(i)
-		e.Encode()
+	println(bmp.Width)
+
+	for i := 0; i < 250; i++ {
+		err = e.Encode(img)
+		if err != nil {
+			t.Error(err)
+		}
 	}
-	e.WriteLastFrame()
-	e.Encode()
+	err = e.Encode(nil)
+	if err != nil {
+		t.Error(err)
+	}
 
 	e.Close()
 }

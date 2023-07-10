@@ -1,117 +1,75 @@
 package ffmpeg
 
+// #cgo CFLAGS: -I/home/max/Downloads/ffmpeg-6.0
+// #cgo LDFLAGS: -L/home/max/Downloads/ffmpeg-6.0 -lavcodec -lavformat -lavutil -lswscale
+// #cgo pkg-config: libavformat libavcodec libavutil libswscale
+// #include <libavformat/avformat.h>
 // #include <libavcodec/avcodec.h>
+// #include <libavutil/imgutils.h>
 // #include <libswscale/swscale.h>
-//
-// // ... yes. Don't ask.
-// typedef struct SwsContext SwsContext;
-//
-// #ifndef PIX_FMT_RGB0
-// #define PIX_FMT_RGB0 PIX_FMT_RGB32
-// #endif
-//
-// #cgo pkg-config: libavdevice libavformat libavfilter libavcodec libswscale libavutil
+// // Function to use the AVERROR macro
+// int my_averror(int errnum) {
+//   return AVERROR(errnum);
+// }
 import "C"
-
 import (
 	"fmt"
-	"io"
-	"os"
-	"reflect"
+	"image"
+	"image/color"
 	"unsafe"
 )
 
 const (
-	CODEC_ID_H264 = C.AV_CODEC_ID_H264
+	width  = 640
+	height = 514
+	fps    = 25
 )
 
 type Encoder struct {
-	//codec uint32
-	//im            image.Image
-	//underlying_im image.Image
-	Output io.Writer
+	file     unsafe.Pointer
+	frameNum int
 
 	codec   *C.AVCodec
 	context *C.AVCodecContext
-	//_swscontext *C.SwsContext
-	frame  *C.AVFrame
-	pkt    *C.AVPacket
-	outbuf []byte
+	frame   *C.AVFrame
+	packet  *C.AVPacket
 }
 
-func init() {
-	C.avcodec_register_all()
+func rgbaToYuv(rgba color.RGBA) (y, u, v uint8) {
+	r := float64(rgba.R)
+	g := float64(rgba.G)
+	b := float64(rgba.B)
+
+	y = uint8((0.257 * r) + (0.504 * g) + (0.098 * b) + 16)
+	u = uint8(-(0.148 * r) - (0.291 * g) + (0.439 * b) + 128)
+	v = uint8((0.439 * r) - (0.368 * g) - (0.071 * b) + 128)
+
+	return y, u, v
 }
-
-func ptr(buf []byte) *C.uint8_t {
-	h := (*reflect.SliceHeader)(unsafe.Pointer(&buf))
-	return (*C.uint8_t)(unsafe.Pointer(h.Data))
-}
-
-/*
-type EncoderOptions struct {
-    BitRate uint32
-    W, H int
-    TimeBase
-} */
-
-/*
-var DefaultEncoderOptions = EncoderOptions{
-    BitRate:400000,
-    W: 0, H: 0,
-    c.time_base = C.AVRational{1,25}
-    c.gop_size = 10
-    c.max_b_frames = 1
-    c.pix_fmt = C.PIX_FMT_RGB
-} */
 
 func NewEncoder(fileName string) (*Encoder, error) {
-	f, err := os.Create(fileName)
+	avcodec := C.avcodec_find_encoder(C.AV_CODEC_ID_H264)
+	if avcodec == nil {
+		panic("Encoder not found.")
+	}
+
+	avctx := C.avcodec_alloc_context3(avcodec)
+	if avctx == nil {
+		panic("Cannot allocate codec context.")
+	}
+
+	avctx.width = C.int(width)
+	avctx.height = C.int(height)
+	avctx.time_base = C.struct_AVRational{1, fps}
+	avctx.pix_fmt = C.AV_PIX_FMT_YUV420P
+
+	if C.avcodec_open2(avctx, avcodec, nil) < 0 {
+		panic("Cannot open codec.")
+	}
+
+	outfile, err := C.fopen(C.CString(fileName), C.CString("wb"))
 	if err != nil {
-		return nil, err
-	}
-
-	codec := C.avcodec_find_encoder(C.AV_CODEC_ID_H264)
-	if codec == nil {
-		return nil, fmt.Errorf("could not find codec")
-	}
-
-	c := C.avcodec_alloc_context3(codec)
-	if c == nil {
-		return nil, fmt.Errorf("сould not allocate video codec context")
-	}
-
-	pkt := C.av_packet_alloc()
-	if pkt == nil {
-		return nil, fmt.Errorf("сould not allocate packet")
-	}
-
-	/* put sample parameters */
-	c.bit_rate = 400000
-	/* resolution must be a multiple of two */
-	c.width = 352
-	c.height = 288
-	/* frames per second */
-	c.time_base = C.AVRational{1, 25}
-	c.framerate = C.AVRational{25, 1}
-
-	/* emit one intra frame every ten frames
-	 * check frame pict_type before passing frame
-	 * to encoder, if frame->pict_type is AV_PICTURE_TYPE_I
-	 * then gop_size is ignored and the output of encoder
-	 * will always be I frame irrespective to gop_size
-	 */
-	c.gop_size = 10
-	c.max_b_frames = 1
-	c.pix_fmt = C.AV_PIX_FMT_YUV420P
-
-	//if (codec->id == AV_CODEC_ID_H264)
-	//	av_opt_set(c->priv_data, "preset", "slow", 0);
-
-	/* open it */
-	ret := C.avcodec_open2(c, codec, nil)
-	if ret < 0 {
-		return nil, fmt.Errorf("Could not open codec: %v\n", ret)
+		panic("Cannot open output file.")
 	}
 
 	frame := C.av_frame_alloc()
@@ -119,246 +77,87 @@ func NewEncoder(fileName string) (*Encoder, error) {
 		return nil, fmt.Errorf("could not allocate video frame")
 	}
 	frame.format = C.AV_PIX_FMT_YUV420P
-	frame.width = c.width
-	frame.height = c.height
+	frame.width = width
+	frame.height = height
 
-	ret = C.av_frame_get_buffer(frame, 0)
+	ret := C.av_frame_get_buffer(frame, 0)
 	if ret < 0 {
 		return nil, fmt.Errorf("could not allocate the video frame data")
 	}
 
-	e := &Encoder{f, codec, c, frame, pkt, make([]byte, 16*1024)}
+	packet := C.av_packet_alloc()
+	if packet == nil {
+		return nil, fmt.Errorf("cannot allocate packet")
+	}
+
+	e := &Encoder{
+		file:    unsafe.Pointer(outfile),
+		codec:   avcodec,
+		context: avctx,
+		frame:   frame,
+		packet:  packet,
+	}
+
 	return e, nil
-}
-
-func (e *Encoder) CreateFrame(pts int) {
-	C.fflush(C.stdout)
-
-	ret := C.av_frame_make_writable(e.frame)
-	if ret < 0 {
-		fmt.Printf("ret less than zero: %v", ret)
-	}
-
-	for y := 0; y < int(e.context.height); y++ {
-		for x := 0; x < int(e.context.width); x++ {
-			e.frame.data[0][y*e.frame.linesize[0]+x] = x + y + pts*3
-		}
-	}
-
-	for y := 0; y < int(e.context.height/2); y++ {
-		for x := 0; x < int(e.context.width/2); x++ {
-			e.frame.data[1][y*e.frame.linesize[1]+x] = 128 + y + pts*2
-			e.frame.data[2][y*e.frame.linesize[2]+x] = 64 + x + pts*5
-		}
-	}
-
-	e.frame.pts = pts
 }
 
 func (e *Encoder) WriteLastFrame() {
 	e.frame = nil
 }
 
-//func NewEncoder(codec uint32, in image.Image, out io.Writer) (*Encoder, error) {
-//	codec := C.avcodec_find_encoder(codec)
-//	if codec == nil {
-//		return nil, fmt.Errorf("could not find codec")
-//	}
-//
-//	c := C.avcodec_alloc_context3(codec)
-//	f := C.av_frame_alloc()
-//	pkt := C.av_packet_alloc()
-//
-//	c.bit_rate = 400000
-//
-//	// resolution must be a multiple of two
-//	w, h := C.int(in.Bounds().Dx()), C.int(in.Bounds().Dy())
-//	if w%2 == 1 || h%2 == 1 {
-//		return nil, fmt.Errorf("Bad image dimensions (%d, %d), must be even", w, h)
-//	}
-//
-//	log.Printf("Encoder dimensions: %d, %d", w, h)
-//
-//	c.width = w
-//	c.height = h
-//	c.time_base = C.AVRational{1, 25} // FPS
-//	c.gop_size = 10                   // emit one intra frame every ten frames
-//	c.max_b_frames = 1
-//
-//	underlying_im := image.NewYCbCr(in.Bounds(), image.YCbCrSubsampleRatio420)
-//	c.pix_fmt = C.AV_PIX_FMT_YUV420P
-//	f.data[0] = ptr(underlying_im.Y)
-//	f.data[1] = ptr(underlying_im.Cb)
-//	f.data[2] = ptr(underlying_im.Cr)
-//	f.linesize[0] = w
-//	f.linesize[1] = w / 2
-//	f.linesize[2] = w / 2
-//
-//	if C.avcodec_open2(c, codec, nil) < 0 {
-//		return nil, fmt.Errorf("could not open codec")
-//	}
-//
-//	_swscontext := C.sws_getContext(w, h, C.AV_PIX_FMT_RGB0, w, h, C.AV_PIX_FMT_YUV420P,
-//		C.SWS_BICUBIC, nil, nil, nil)
-//
-//	e := &Encoder{codec, in, underlying_im, out, codec, c, _swscontext, f, pkt, make([]byte, 16*1024)}
-//	return e, nil
-//}
+func (e *Encoder) Encode(img image.Image) error {
+	if img != nil {
+		for y := 0; y < img.Bounds().Dy(); y++ {
+			for x := 0; x < img.Bounds().Dx(); x++ {
+				r, g, b, _ := img.At(x, y).RGBA()
+				yy, uu, vv := rgbaToYuv(color.RGBA{uint8(r), uint8(g), uint8(b), 255})
 
-//func (e *Encoder) WriteFrame() error {
-//	e._frame.pts = C.int64_t(e._context.frame_number)
-//
-//	var input_data [3]*C.uint8_t
-//	var input_linesize [3]C.int
-//
-//	switch im := e.im.(type) {
-//	case *image.RGBA:
-//		bpp := 4
-//		input_data = [3]*C.uint8_t{ptr(im.Pix)}
-//		input_linesize = [3]C.int{C.int(e.im.Bounds().Dx() * bpp)}
-//	case *image.NRGBA:
-//		bpp := 4
-//		input_data = [3]*C.uint8_t{ptr(im.Pix)}
-//		input_linesize = [3]C.int{C.int(e.im.Bounds().Dx() * bpp)}
-//	default:
-//		panic("Unknown input image type")
-//	}
-//
-//	// Perform scaling from input type to output type
-//	C.sws_scale(e._swscontext, &input_data[0], &input_linesize[0],
-//		0, e._context.height,
-//		&e._frame.data[0], &e._frame.linesize[0])
-//
-//	outsize := C.avcodec_encode_video2(e._context, ptr(e._outbuf),
-//		C.int(len(e._outbuf)), e._frame)
-//
-//	if outsize == 0 {
-//		return nil
-//	}
-//
-//	n, err := e.Output.Write(e._outbuf[:outsize])
-//	if err != nil {
-//		return err
-//	}
-//	if n < int(outsize) {
-//		return fmt.Errorf("Short write, expected %d, wrote %d", outsize, n)
-//	}
-//
-//	return nil
-//}
+				// Set pixel at (x, y) to the corresponding color in Y plane.
+				pointer := unsafe.Pointer(uintptr(unsafe.Pointer(e.frame.data[0])) + uintptr(y)*uintptr(e.frame.linesize[0]) + uintptr(x))
+				*(*C.uint8_t)(pointer) = C.uint8_t(yy)
 
-func (e *Encoder) Encode() {
-	/* send the frame to the encoder */
-	if e.frame != nil {
-		fmt.Printf("Send frame %v", e.frame.pts)
+				// The U and V planes are half the size of the Y plane in YUV420P.
+				if y%2 == 0 && x%2 == 0 {
+					// Set pixel at (x/2, y/2) to the corresponding color in U and V planes.
+					pointer = unsafe.Pointer(uintptr(unsafe.Pointer(e.frame.data[1])) + uintptr(y/2)*uintptr(e.frame.linesize[1]) + uintptr(x/2))
+					*(*C.uint8_t)(pointer) = C.uint8_t(uu)
+					pointer = unsafe.Pointer(uintptr(unsafe.Pointer(e.frame.data[2])) + uintptr(y/2)*uintptr(e.frame.linesize[2]) + uintptr(x/2))
+					*(*C.uint8_t)(pointer) = C.uint8_t(vv)
+				}
+			}
+		}
+
+		e.frame.pts = C.int64_t(e.frameNum)
+		e.frameNum++
+	} else {
+		// last frame
+		e.frame = nil
 	}
 
 	ret := C.avcodec_send_frame(e.context, e.frame)
 	if ret < 0 {
-		fmt.Println("Error sending a frame for encoding")
+		return fmt.Errorf("avcodec_send_frame returned: %v", ret)
 	}
 
-	for ret >= 0 {
-		ret = C.avcodec_receive_packet(e.context, e.pkt)
-		if ret == C.EAGAIN || ret == C.AVERROR_EOF {
-			return
-		}
-		if ret < 0 {
-			fmt.Println("error during encoding")
+	for {
+		ret = C.avcodec_receive_packet(e.context, e.packet)
+		if ret == C.my_averror(C.EAGAIN) || ret == C.my_averror(C.EOF) {
+			break
+		} else if ret < 0 {
+			return fmt.Errorf("avcodec_receive_packet returned: %v", ret)
 		}
 
-		fmt.Printf("Write packet %v, %v", e.pkt.pts, e.pkt.size)
-		C.fwrite(e.pkt.data, 1, e.pkt.size, e.Output)
-		C.av_packet_unref(e.pkt)
+		C.fwrite(unsafe.Pointer(e.packet.data), 1, C.size_t(e.packet.size), (*C.FILE)(e.file))
+
+		C.av_packet_unref(e.packet)
 	}
+
+	return nil
 }
 
 func (e *Encoder) Close() {
-	C.fclose(e.Output)
-
-	C.avcodec_free_context(e.context)
-	C.av_frame_free(e.frame)
-	C.av_packet_free(e.pkt)
+	C.fclose((*C.FILE)(e.file))
+	C.av_frame_free(&e.frame)
+	C.av_packet_free(&e.packet)
+	C.avcodec_free_context(&e.context)
 }
-
-//func (e *Encoder) Encode() error {
-//	e._frame.pts = C.int64_t(e._context.frame_number)
-//
-//	//var input_data [3]*C.uint8_t
-//	//var input_linesize [3]C.int
-//	//
-//	//switch im := e.im.(type) {
-//	//case *image.RGBA:
-//	//	bpp := 4
-//	//	input_data = [3]*C.uint8_t{ptr(im.Pix)}
-//	//	input_linesize = [3]C.int{C.int(e.im.Bounds().Dx() * bpp)}
-//	//case *image.NRGBA:
-//	//	bpp := 4
-//	//	input_data = [3]*C.uint8_t{ptr(im.Pix)}
-//	//	input_linesize = [3]C.int{C.int(e.im.Bounds().Dx() * bpp)}
-//	//default:
-//	//	panic("Unknown input image type")
-//	//}
-//	//
-//	//// Perform scaling from input type to output type
-//	//C.sws_scale(e._swscontext, &input_data[0], &input_linesize[0],
-//	//	0, e._context.height,
-//	//	&e._frame.data[0], &e._frame.linesize[0])
-//
-//	var ret C.int
-//
-//	ret = C.avcodec_send_frame(e._context, e._frame)
-//	if ret < 0 {
-//		println("Error sending a frame for encoding")
-//	}
-//
-//	for ret >= 0 {
-//		ret = C.avcodec_receive_packet(e._context, e._pkt)
-//		if ret == C.EAGAIN || ret == C.AVERROR_EOF {
-//			return nil
-//		} else if ret < 0 {
-//			println("Error during encoding")
-//		}
-//
-//		//printf("Write packet %3"PRId64" (size=%5d)\n", pkt->pts, pkt->size);
-//		//fwrite(pkt->data, 1, pkt->size, outfile);
-//
-//		//_, err := e.Output.Write(e._pkt.data[:e._pkt.size])
-//		//if err != nil {
-//		//	return err
-//		//}
-//		//C.av_packet_unref(e._pkt)
-//	}
-//	return nil
-//}
-
-//func (e *Encoder) Close() {
-//
-//	// Process "delayed" frames
-//	for {
-//		outsize := C.avcodec_encode_video2(e._context, ptr(e._outbuf),
-//			C.int(len(e._outbuf)), nil)
-//
-//		if outsize == 0 {
-//			break
-//		}
-//
-//		n, err := e.Output.Write(e._outbuf[:outsize])
-//		if err != nil {
-//			panic(err)
-//		}
-//		if n < int(outsize) {
-//			panic(fmt.Errorf("Short write, expected %d, wrote %d", outsize, n))
-//		}
-//	}
-//
-//	n, err := e.Output.Write([]byte{0, 0, 1, 0xb7})
-//	if err != nil || n != 4 {
-//		log.Panicf("Error finishing mpeg file: %q; n = %d", err, n)
-//	}
-//
-//	C.avcodec_close((*C.AVCodecContext)(unsafe.Pointer(e._context)))
-//	C.av_free(unsafe.Pointer(e._context))
-//	C.av_free(unsafe.Pointer(e._frame))
-//	e._frame, e.codec = nil, nil
-//}
