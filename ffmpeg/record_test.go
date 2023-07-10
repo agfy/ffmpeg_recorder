@@ -11,6 +11,7 @@ func TestEncoder(t *testing.T) {
 	if err != nil {
 		log.Panicf("Unable to start encoder: %q", err)
 	}
+	defer e.Close()
 
 	img, err := robotgo.Read("test.png")
 	if err != nil {
@@ -27,10 +28,4 @@ func TestEncoder(t *testing.T) {
 			t.Error(err)
 		}
 	}
-	err = e.Encode(nil)
-	if err != nil {
-		t.Error(err)
-	}
-
-	e.Close()
 }

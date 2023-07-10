@@ -101,38 +101,29 @@ func NewEncoder(fileName string) (*Encoder, error) {
 	return e, nil
 }
 
-func (e *Encoder) WriteLastFrame() {
-	e.frame = nil
-}
-
 func (e *Encoder) Encode(img image.Image) error {
-	if img != nil {
-		for y := 0; y < img.Bounds().Dy(); y++ {
-			for x := 0; x < img.Bounds().Dx(); x++ {
-				r, g, b, _ := img.At(x, y).RGBA()
-				yy, uu, vv := rgbaToYuv(color.RGBA{uint8(r), uint8(g), uint8(b), 255})
+	for y := 0; y < img.Bounds().Dy(); y++ {
+		for x := 0; x < img.Bounds().Dx(); x++ {
+			r, g, b, _ := img.At(x, y).RGBA()
+			yy, uu, vv := rgbaToYuv(color.RGBA{uint8(r), uint8(g), uint8(b), 255})
 
-				// Set pixel at (x, y) to the corresponding color in Y plane.
-				pointer := unsafe.Pointer(uintptr(unsafe.Pointer(e.frame.data[0])) + uintptr(y)*uintptr(e.frame.linesize[0]) + uintptr(x))
-				*(*C.uint8_t)(pointer) = C.uint8_t(yy)
+			// Set pixel at (x, y) to the corresponding color in Y plane.
+			pointer := unsafe.Pointer(uintptr(unsafe.Pointer(e.frame.data[0])) + uintptr(y)*uintptr(e.frame.linesize[0]) + uintptr(x))
+			*(*C.uint8_t)(pointer) = C.uint8_t(yy)
 
-				// The U and V planes are half the size of the Y plane in YUV420P.
-				if y%2 == 0 && x%2 == 0 {
-					// Set pixel at (x/2, y/2) to the corresponding color in U and V planes.
-					pointer = unsafe.Pointer(uintptr(unsafe.Pointer(e.frame.data[1])) + uintptr(y/2)*uintptr(e.frame.linesize[1]) + uintptr(x/2))
-					*(*C.uint8_t)(pointer) = C.uint8_t(uu)
-					pointer = unsafe.Pointer(uintptr(unsafe.Pointer(e.frame.data[2])) + uintptr(y/2)*uintptr(e.frame.linesize[2]) + uintptr(x/2))
-					*(*C.uint8_t)(pointer) = C.uint8_t(vv)
-				}
+			// The U and V planes are half the size of the Y plane in YUV420P.
+			if y%2 == 0 && x%2 == 0 {
+				// Set pixel at (x/2, y/2) to the corresponding color in U and V planes.
+				pointer = unsafe.Pointer(uintptr(unsafe.Pointer(e.frame.data[1])) + uintptr(y/2)*uintptr(e.frame.linesize[1]) + uintptr(x/2))
+				*(*C.uint8_t)(pointer) = C.uint8_t(uu)
+				pointer = unsafe.Pointer(uintptr(unsafe.Pointer(e.frame.data[2])) + uintptr(y/2)*uintptr(e.frame.linesize[2]) + uintptr(x/2))
+				*(*C.uint8_t)(pointer) = C.uint8_t(vv)
 			}
 		}
-
-		e.frame.pts = C.int64_t(e.frameNum)
-		e.frameNum++
-	} else {
-		// last frame
-		e.frame = nil
 	}
+
+	e.frame.pts = C.int64_t(e.frameNum)
+	e.frameNum++
 
 	ret := C.avcodec_send_frame(e.context, e.frame)
 	if ret < 0 {
