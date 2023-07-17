@@ -1,4 +1,4 @@
-package ffmpeg
+package main
 
 // #cgo pkg-config: libavformat libavcodec libavutil libswscale
 // #include <libavformat/avformat.h>
@@ -15,12 +15,6 @@ import (
 	"image"
 	"image/color"
 	"unsafe"
-)
-
-const (
-	width  = 640
-	height = 514
-	fps    = 25
 )
 
 type Encoder struct {
@@ -45,7 +39,7 @@ func rgbaToYuv(rgba color.RGBA) (y, u, v uint8) {
 	return y, u, v
 }
 
-func NewEncoder(fileName string) (*Encoder, error) {
+func NewEncoder(fileName string, width, height, fps C.int) (*Encoder, error) {
 	avcodec := C.avcodec_find_encoder(C.AV_CODEC_ID_H264)
 	if avcodec == nil {
 		panic("Encoder not found.")
@@ -56,9 +50,9 @@ func NewEncoder(fileName string) (*Encoder, error) {
 		panic("Cannot allocate codec context.")
 	}
 
-	avctx.width = C.int(width)
-	avctx.height = C.int(height)
-	avctx.time_base = C.struct_AVRational{1, fps}
+	avctx.width = width
+	avctx.height = height
+	avctx.time_base = C.struct_AVRational{1, C.int(fps)}
 	avctx.pix_fmt = C.AV_PIX_FMT_YUV420P
 
 	if C.avcodec_open2(avctx, avcodec, nil) < 0 {

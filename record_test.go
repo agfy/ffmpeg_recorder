@@ -1,4 +1,4 @@
-package ffmpeg
+package main
 
 import (
 	"github.com/go-vgo/robotgo"
@@ -7,7 +7,7 @@ import (
 )
 
 func TestEncoder(t *testing.T) {
-	e, err := NewEncoder("test.mpeg")
+	e, err := NewEncoder("test.mpeg", 640, 514, 25)
 	if err != nil {
 		log.Panicf("Unable to start encoder: %q", err)
 	}

@@ -2,7 +2,7 @@
 simple Golang example of recording a video using ffmpeg with cgo.
 
 ## Installation
-sudo apt-get install libavcodec-dev libavformat-dev libavutil-dev libswscale-dev
+sudo apt-get install libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libxtst-dev
 
 ## If ffmpeg is not in standard place set environment variables
 ```
